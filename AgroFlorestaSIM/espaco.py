@@ -52,3 +52,11 @@ class Espaco:
         raise ValueError(f"Não há espaço suficiente para plantar {cultura.nome} com copa de {cultura.diametro_copa}m.")
     def limpar(self):
         self.grade = [[None for _ in range(self.tamanho)] for _ in range(self.tamanho)]
+    def linha_permitida_para(self, categoria, x):
+        if categoria == 'Frutífera':
+            return x % 3 == 0
+        elif categoria == 'Hortaliça':
+            return x % 3 == 1
+        elif categoria == 'Roça':
+            return x % 3 in (0, 2)
+        return True

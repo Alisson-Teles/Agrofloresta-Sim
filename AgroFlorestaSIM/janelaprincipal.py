@@ -14,7 +14,6 @@ class JanelaPrincipal:
     def __init__(self, caminho_json):
         self.controlador = ControladorCulturas(caminho_json)
         self.espaco = Espaco(tamanho=TAMANHO_INICIAL_MALHA)
-
         self.root = tk.Tk()
         self.root.title("AgroflorestaSIM")
         self.root.geometry("1000x800")
@@ -31,6 +30,10 @@ class JanelaPrincipal:
             bg="white"
         )
         self.canvas.pack()
+        self.canvas.bind("<Button-1>", self.plantar_em_clique)  # Clique para plantar
+        self.canvas.bind("<Button-1>", self.iniciar_arrasto)
+        self.canvas.bind("<ButtonRelease-1>", self.finalizar_arrasto)
+
 
         self.malha_ui = InterfaceMalha(self.canvas, self.espaco)
 
@@ -39,6 +42,11 @@ class JanelaPrincipal:
         self.atualizar_selecionadas()
         self.malha_ui.redesenhar()
         self.root.mainloop()
+
+        self.ultima_cultura_selecionada = None  # Armazena a cultura ativa
+        self.posicao_inicio_arrasto = None
+        
+        
 
     def criar_interface_lateral(self):
         tk.Label(self.frame_esq, text="Culturas", font=("Arial", 14, "bold")).pack()
@@ -91,7 +99,7 @@ class JanelaPrincipal:
         nome = self.combo_culturas.get()
         cultura_dict = self.controlador.obter_por_nome(nome)
         if cultura_dict:
-            self.plantar(cultura_dict)
+            self.ultima_cultura_selecionada = cultura_dict  # Agora guarda a última cultura selecionada
 
     def plantar(self, cd):
         nova = Cultura(**cd)
@@ -134,6 +142,70 @@ class JanelaPrincipal:
         self.controlador.selecionadas.clear()
         self.atualizar_selecionadas()
         self.malha_ui.redesenhar()
+    def plantar_em_clique(self, event):
+        if not self.ultima_cultura_selecionada:
+            messagebox.showinfo("Seleção necessária", "Selecione uma cultura primeiro.")
+            return
 
+        x = event.y // ESCALA_METRO
+        y = event.x // ESCALA_METRO
+        nova = Cultura(**self.ultima_cultura_selecionada)
+
+        if not self.espaco.linha_permitida_para(nova.categoria, x):
+            messagebox.showinfo(
+                "Linha inválida",
+                f"{nova.categoria} não pode ser plantada na linha {x}.\n"
+                f"Linhas permitidas: "
+                f"{'Frutíferas → x % 3 == 0' if nova.categoria == 'Frutífera' else ''}"
+                f"{'Hortaliças → x % 3 == 1' if nova.categoria == 'Hortaliça' else ''}"
+                f"{'Roça → x % 3 == 0 ou 2' if nova.categoria == 'Roça' else ''}"
+            )
+            return
+
+        if not self.espaco.is_disponivel(x, y):
+            messagebox.showinfo("Espaço ocupado", "Essa posição já está ocupada.")
+            return
+
+        if not self.espaco.pode_plantar(nova, x, y):
+            messagebox.showinfo("Restrição de plantio", f"Não é possível plantar {nova.nome} nessa posição.")
+            return
+
+        self.espaco.grade[x][y] = nova
+        self.controlador.registrar_selecao(nova, (x, y))
+        self.atualizar_selecionadas()
+        self.malha_ui.redesenhar()
+    def iniciar_arrasto(self, event):
+        x = event.y // ESCALA_METRO
+        y = event.x // ESCALA_METRO
+        self.posicao_inicio_arrasto = (x, y)
+    def finalizar_arrasto(self, event):
+        if not self.ultima_cultura_selecionada:
+            return
+
+        x0, y0 = self.posicao_inicio_arrasto or (0, 0)
+        x1 = event.y // ESCALA_METRO
+        y1 = event.x // ESCALA_METRO
+
+        # Ordenar coordenadas para percorrer corretamente
+        linha_inicio, linha_fim = sorted((x0, x1))
+        coluna_inicio, coluna_fim = sorted((y0, y1))
+
+        cultura_base = Cultura(**self.ultima_cultura_selecionada)
+
+        for x in range(linha_inicio, linha_fim + 1):
+            for y in range(coluna_inicio, coluna_fim + 1):
+                if not self.espaco.linha_permitida_para(cultura_base.categoria, x):
+                    continue
+                if not self.espaco.is_disponivel(x, y):
+                    continue
+                if not self.espaco.pode_plantar(cultura_base, x, y):
+                    continue
+
+                nova = Cultura(**self.ultima_cultura_selecionada)
+                self.espaco.grade[x][y] = nova
+                self.controlador.registrar_selecao(nova, (x, y))
+
+        self.atualizar_selecionadas()
+        self.malha_ui.redesenhar()
 if __name__ == "__main__":
     JanelaPrincipal(os.path.join(os.path.dirname(__file__), "culturas.json"))
