@@ -1,0 +1,26 @@
+Mage.Space
+
+– roda Stable Diffusion XL no navegador, tem versão gratuita com limite diário.
+– basta colar o prompt no campo e clicar em “generate”.
+
+Leonardo.ai
+
+– dá créditos grátis ao criar conta.
+– suporta Stable Diffusion XL e modelos treinados (mais artístico).
+– boa para experimentar estilos diferentes.
+
+Playground AI
+
+– também roda SDXL.
+– plano gratuito com várias gerações por dia.
+– aceita prompts longos e negativos, ótimo para o seu caso.
+
+Hugging Face Spaces
+
+– procure por “Stable Diffusion XL” ou “Flux Schnell”.
+– vários espaços permitem colar o prompt e gerar sem precisar de login (alguns exigem).
+
+Bing Image Creator
+ (usa DALL·E 3)
+– totalmente gratuito, só precisa de conta Microsoft.
+– ótimo para linguagem natural, mas não é tão fiel a posições (linha, coluna).

@@ -1,17 +1,21 @@
 # Novo layout baseado na arquitetura sugerida
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import os, json
 from culturas import Cultura
 from espaco import Espaco
 from ControladorCulturas import ControladorCulturas
 from InterfaceMalha import InterfaceMalha
+import deepseek  # 🔹 ADICIONADO
 
 ESCALA_METRO = 30
 TAMANHO_INICIAL_MALHA = 10
 
 class JanelaPrincipal:
     def __init__(self, caminho_json):
+
+        self.celulas_selecionadas = set()  # Conjunto de (x, y)
+        self.modo_remocao = False
         self.controlador = ControladorCulturas(caminho_json)
         self.espaco = Espaco(tamanho=TAMANHO_INICIAL_MALHA)
         self.root = tk.Tk()
@@ -32,10 +36,15 @@ class JanelaPrincipal:
         self.canvas.pack()
         self.canvas.bind("<Button-1>", self.plantar_em_clique)  # Clique para plantar
         self.canvas.bind("<Button-1>", self.iniciar_arrasto)
+        self.canvas.bind("<B1-Motion>", self.atualizar_area_arrasto) #Mostrar seleção em tempo real
         self.canvas.bind("<ButtonRelease-1>", self.finalizar_arrasto)
+        
 
+        self.malha_ui = InterfaceMalha(self.canvas, self.espaco, pai=self)
 
-        self.malha_ui = InterfaceMalha(self.canvas, self.espaco)
+        #GARANTE atributos usados em outros métodos
+        self.ultima_cultura_selecionada = None
+        self.posicao_inicio_arrasto = None
 
         self.criar_interface_lateral()
         self.atualizar_combobox_culturas(self.controlador.culturas_dict)
@@ -43,10 +52,9 @@ class JanelaPrincipal:
         self.malha_ui.redesenhar()
         self.root.mainloop()
 
-        self.ultima_cultura_selecionada = None  # Armazena a cultura ativa
-        self.posicao_inicio_arrasto = None
-        
-        
+        style = ttk.Style()
+        style.configure("BotaoVerde.TButton", background="green", foreground="white")
+        style.map("BotaoVerde.TButton", background=[('active', 'darkgreen')])
 
     def criar_interface_lateral(self):
         tk.Label(self.frame_esq, text="Culturas", font=("Arial", 14, "bold")).pack()
@@ -72,9 +80,34 @@ class JanelaPrincipal:
         self.scale_malha.set(TAMANHO_INICIAL_MALHA)
         self.scale_malha.pack(pady=10)
 
+        #Botão novo: Criar imagem do plantio
+        ttk.Button(
+            self.frame_esq, text="Criar imagem do plantio",
+            command=self.criar_imagem_do_plantio
+        ).pack(pady=6, fill="x")
+
         tk.Label(self.frame_esq, text="Remover Culturas", font=("Arial", 14, "bold")).pack(pady=10)
         self.frame_s = tk.Frame(self.frame_esq)
         self.frame_s.pack(fill="x")
+
+    def atualizar_area_arrasto(self, event):
+        if not self.posicao_inicio_arrasto:
+            return
+
+        x0, y0 = self.posicao_inicio_arrasto
+        x1 = event.y // ESCALA_METRO
+        y1 = event.x // ESCALA_METRO
+
+        linha_inicio, linha_fim = sorted((x0, x1))
+        coluna_inicio, coluna_fim = sorted((y0, y1))
+
+        # Atualiza seleção visual em tempo real
+        self.celulas_selecionadas = set(
+            (x, y)
+            for x in range(linha_inicio, linha_fim + 1)
+            for y in range(coluna_inicio, coluna_fim + 1)
+        )
+        self.malha_ui.redesenhar()
 
     def atualizar_combobox_culturas(self, culturas_lista):
         nomes = [c['nome'] for c in culturas_lista]
@@ -125,6 +158,54 @@ class JanelaPrincipal:
 
         ttk.Button(self.frame_s, text="Remover Selecionada", command=self.remover_selecionada).pack(pady=5)
 
+        self.botao_remover_arrasto = ttk.Button(
+            self.frame_s,
+            text="Remover por arrasto (OFF)",
+            command=self.toggle_remocao_arrasto
+        )
+        self.botao_remover_arrasto.pack(pady=3)
+        ttk.Button(self.frame_s,text="Remover todas selecionadas",command=self.remover_todas_selecionadas).pack(pady=3)
+        
+    def toggle_remocao_arrasto(self):
+        self.modo_remocao = not getattr(self, "modo_remocao", False)
+
+        if self.modo_remocao:
+            self.botao_remover_arrasto.config(
+                text="Remover por arrasto (ON)",
+                style="BotaoVerde.TButton"
+            )
+            messagebox.showinfo("Modo Remoção Ativado", "Agora você pode arrastar sobre a malha para remover culturas.")
+        else:
+            self.botao_remover_arrasto.config(
+                text="Remover por arrasto (OFF)",
+                style="TButton"
+            )
+            self.celulas_selecionadas.clear()
+            self.malha_ui.redesenhar()
+
+    
+    
+    def remover_todas_selecionadas(self):
+        if not self.controlador.selecionadas:
+            messagebox.showinfo("Nada para remover", "Nenhuma cultura está selecionada.")
+            return
+
+        if messagebox.askyesno("Confirmar", "Deseja remover todas as culturas selecionadas?"):
+            for cultura, (x, y) in self.controlador.selecionadas:
+                self.espaco.grade[x][y] = None
+            self.controlador.selecionadas.clear()
+
+            self.celulas_selecionadas.clear()
+            self.ultima_cultura_selecionada = None  # força não desenhar marcação azul/vermelha
+
+            self.malha_ui.redesenhar()
+            self.atualizar_selecionadas()
+
+
+    def ativar_remocao_arrasto(self):
+        messagebox.showinfo("Modo Remoção", "Agora arraste sobre a malha para remover culturas.")
+        self.modo_remocao = True
+            
     def remover_selecionada(self):
         sel = self.combo_remover.get()
         if sel:
@@ -137,13 +218,15 @@ class JanelaPrincipal:
 
     def alterar_escala_malha(self, valor):
         novo_tamanho = int(valor)
+        # OBS: seu Espaco atual não tem redimensionar; mantenho sua chamada como está.
         self.espaco.redimensionar(novo_tamanho)
         self.canvas.config(width=novo_tamanho * ESCALA_METRO, height=novo_tamanho * ESCALA_METRO)
         self.controlador.selecionadas.clear()
         self.atualizar_selecionadas()
         self.malha_ui.redesenhar()
+
     def plantar_em_clique(self, event):
-        if not self.ultima_cultura_selecionada:
+        if not getattr(self, "ultima_cultura_selecionada", None):
             messagebox.showinfo("Seleção necessária", "Selecione uma cultura primeiro.")
             return
 
@@ -174,21 +257,44 @@ class JanelaPrincipal:
         self.controlador.registrar_selecao(nova, (x, y))
         self.atualizar_selecionadas()
         self.malha_ui.redesenhar()
+
     def iniciar_arrasto(self, event):
         x = event.y // ESCALA_METRO
         y = event.x // ESCALA_METRO
         self.posicao_inicio_arrasto = (x, y)
-    def finalizar_arrasto(self, event):
-        if not self.ultima_cultura_selecionada:
-            return
 
+    def finalizar_arrasto(self, event):
         x0, y0 = self.posicao_inicio_arrasto or (0, 0)
         x1 = event.y // ESCALA_METRO
         y1 = event.x // ESCALA_METRO
 
-        # Ordenar coordenadas para percorrer corretamente
         linha_inicio, linha_fim = sorted((x0, x1))
         coluna_inicio, coluna_fim = sorted((y0, y1))
+
+        # Atualiza seleção visual
+        self.celulas_selecionadas = set(
+            (x, y)
+            for x in range(linha_inicio, linha_fim + 1)
+            for y in range(coluna_inicio, coluna_fim + 1)
+        )
+
+        # REMOÇÃO (tem prioridade)
+        if self.modo_remocao:
+            for x, y in self.celulas_selecionadas:
+                cultura = self.espaco.grade[x][y]
+                if cultura:
+                    self.espaco.grade[x][y] = None
+                    self.controlador.remover_selecao(cultura.nome, x, y)
+
+            self.modo_remocao = False  # desativa o modo automaticamente (ou mantenha ativo se preferir)
+            self.atualizar_selecionadas()
+            self.malha_ui.redesenhar()
+            self.celulas_selecionadas.clear()
+            return  # impede o plantio
+
+        # PLANTIO (somente se não estiver no modo de remoção)
+        if not getattr(self, "ultima_cultura_selecionada", None):
+            return
 
         cultura_base = Cultura(**self.ultima_cultura_selecionada)
 
@@ -207,5 +313,69 @@ class JanelaPrincipal:
 
         self.atualizar_selecionadas()
         self.malha_ui.redesenhar()
+        self.celulas_selecionadas.clear()
+
+
+    # ------------------------------
+    # NOVO: Gera prompt de imagem
+    # ------------------------------
+    def criar_imagem_do_plantio(self):
+        # Verifica se a InterfaceMalha tem o método (adicionamos no arquivo dela)
+        if not hasattr(self.malha_ui, "get_layout_para_imagem"):
+            messagebox.showwarning(
+                "Função indisponível",
+                "Atualize o arquivo InterfaceMalha.py para incluir get_layout_para_imagem()."
+            )
+            return
+
+        layout = self.malha_ui.get_layout_para_imagem()
+        if not layout.get("itens"):
+            messagebox.showinfo("Layout vazio", "Nenhuma cultura posicionada na malha.")
+            return
+
+        try:
+            resp = deepseek.gerar_prompt_imagem(layout, idioma="pt-BR", estilo="realista fotográfico")
+        except Exception as e:
+            messagebox.showerror("Erro ao gerar prompt", f"{e}")
+            return
+
+        prompt = resp.get("prompt", "").strip()
+        neg = resp.get("negative_prompt", "").strip()
+        conteudo = "PROMPT:\n" + (prompt or "") + ("\n\nNEGATIVE PROMPT:\n" + neg if neg else "")
+
+        # Janela com campo de texto + copiar/salvar
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Prompt de imagem do plantio")
+        dlg.geometry("820x560")
+
+        txt = tk.Text(dlg, wrap="word")
+        txt.insert("1.0", conteudo)
+        txt.pack(fill="both", expand=True, padx=10, pady=10)
+
+        btn_frame = tk.Frame(dlg)
+        btn_frame.pack(fill="x", padx=10, pady=6)
+
+        def copiar():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(txt.get("1.0", "end-1c"))
+            messagebox.showinfo("Copiado", "Prompt copiado para a área de transferência.")
+
+        def salvar():
+            arq = filedialog.asksaveasfilename(
+                parent=dlg,
+                title="Salvar prompt",
+                defaultextension=".txt",
+                filetypes=[("Arquivo de texto", "*.txt")]
+            )
+            if arq:
+                with open(arq, "w", encoding="utf-8") as f:
+                    f.write(txt.get("1.0", "end-1c"))
+                messagebox.showinfo("Salvo", f"Arquivo salvo em:\n{arq}")
+
+        ttk.Button(btn_frame, text="Copiar", command=copiar).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Salvar .txt", command=salvar).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Fechar", command=dlg.destroy).pack(side="right", padx=4)
+
+
 if __name__ == "__main__":
     JanelaPrincipal(os.path.join(os.path.dirname(__file__), "culturas.json"))
