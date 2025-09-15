@@ -187,6 +187,8 @@ class JanelaPrincipal:
             for y in range(coluna_inicio, coluna_fim + 1)
         )
         self.malha_ui.redesenhar()
+        self.canvas.update_idletasks()
+
 
     def atualizar_combobox_culturas(self, culturas_lista):
         nomes = [c['nome'] for c in culturas_lista]
@@ -224,42 +226,70 @@ class JanelaPrincipal:
         self.atualizar_selecionadas()
         self.malha_ui.redesenhar()
 
+    def grade_esta_vazia(self):
+        for linha in self.espaco.grade:
+            if any(c is not None for c in linha):
+                return False
+        return True
+    
     def atualizar_selecionadas(self):
-        for w in self.frame_s.winfo_children(): w.destroy()
+        # Limpa a área
+        for w in self.frame_s.winfo_children():
+            w.destroy()
 
+        # Lista textual para o combobox (se houver selecionadas salvas no controlador)
         valores = [f"{c.nome} em ({x},{y})" for c, (x, y) in self.controlador.selecionadas]
-        if not valores:
-            ttk.Label(self.frame_s, text="Nenhuma cultura selecionada.").pack()
-            return
 
-        self.combo_remover = ttk.Combobox(self.frame_s, values=valores)
-        self.combo_remover.pack(pady=5)
+        # Se houver itens, mostra combobox e botões dependentes
+        if valores:
+            self.combo_remover = ttk.Combobox(self.frame_s, values=valores, state="readonly")
+            self.combo_remover.pack(pady=5)
 
-        ttk.Button(self.frame_s, text="Remover Selecionada", command=self.remover_selecionada).pack(pady=5)
+            ttk.Button(self.frame_s, text="Remover Selecionada", command=self.remover_selecionada).pack(pady=5)
 
+            # "Remover todas selecionadas" habilitado quando há itens
+            ttk.Button(self.frame_s, text="Remover todas selecionadas",
+                    command=self.remover_todas_selecionadas).pack(pady=3)
+        else:
+            ttk.Label(self.frame_s, text="Nenhuma cultura selecionada.").pack(pady=5)
+
+            # Mesmo sem itens, exibe o botão "Remover todas selecionadas" desabilitado
+            btn_todas = ttk.Button(self.frame_s, text="Remover todas selecionadas",
+                                command=self.remover_todas_selecionadas)
+            btn_todas.state(["disabled"])
+            btn_todas.pack(pady=3)
+
+        # SEMPRE criar (ou recriar) o botão de "remover por clique" e refletir o estado atual
         self.botao_remover_arrasto = ttk.Button(
             self.frame_s,
-            text="Remover por arrasto (OFF)",
+            text="remover por clique (ON)" if self.modo_remocao else "remover por clique (OFF)",
             command=self.toggle_remocao_arrasto
         )
+        # Ajusta o estilo conforme o estado atual
+        if self.modo_remocao:
+            self.botao_remover_arrasto.config(style="BotaoVerde.TButton")
+        else:
+            self.botao_remover_arrasto.config(style="TButton")
+
         self.botao_remover_arrasto.pack(pady=3)
-        ttk.Button(self.frame_s,text="Remover todas selecionadas",command=self.remover_todas_selecionadas).pack(pady=3)
+
         
     def toggle_remocao_arrasto(self):
         self.modo_remocao = not getattr(self, "modo_remocao", False)
 
         if self.modo_remocao:
             self.botao_remover_arrasto.config(
-                text="Remover por arrasto (ON)",
+                text="remover por clique (ON)",
                 style="BotaoVerde.TButton"
             )
             messagebox.showinfo("Modo Remoção Ativado", "Agora você pode arrastar sobre a malha para remover culturas.")
         else:
             self.botao_remover_arrasto.config(
-                text="Remover por arrasto (OFF)",
+                text="remover por clique (OFF)",
                 style="TButton"
             )
             self.celulas_selecionadas.clear()
+            self.posicao_inicio_arrasto = None
             self.malha_ui.redesenhar()
 
     
@@ -350,12 +380,12 @@ class JanelaPrincipal:
         linha_inicio, linha_fim = sorted((x0, x1))
         coluna_inicio, coluna_fim = sorted((y0, y1))
 
-        # Atualiza seleção visual
-        self.celulas_selecionadas = set(
+        # Atualiza a seleção com a área final do arrasto (para usar nas operações)
+        self.celulas_selecionadas = {
             (x, y)
             for x in range(linha_inicio, linha_fim + 1)
             for y in range(coluna_inicio, coluna_fim + 1)
-        )
+        }
 
         # REMOÇÃO (tem prioridade)
         if self.modo_remocao:
@@ -365,14 +395,29 @@ class JanelaPrincipal:
                     self.espaco.grade[x][y] = None
                     self.controlador.remover_selecao(cultura.nome, x, y)
 
-            self.modo_remocao = False  # desativa o modo automaticamente (ou mantenha ativo se preferir)
-            self.atualizar_selecionadas()
-            self.malha_ui.redesenhar()
+            # Limpa seleção visual ao soltar o mouse
             self.celulas_selecionadas.clear()
-            return  # impede o plantio
+            self.posicao_inicio_arrasto = None
 
-        # PLANTIO (somente se não estiver no modo de remoção)
+            # Se a malha ficou vazia, "reinicia o sistema de plantio":
+            #  - desliga o modo de remoção
+            #  - atualiza o botão para OFF
+            if self.grade_esta_vazia():
+                self.modo_remocao = False
+
+            # Atualiza UI refletindo o estado atual do toggle
+            self.atualizar_selecionadas()
+            # (se o botão foi recriado acima, ele já virá com texto/estilo coerentes ao self.modo_remocao)
+            self.malha_ui.redesenhar()
+            return  # impede o plantio enquanto o modo estiver ON
+
+
+        # PLANTIO (se não estiver em modo remoção)
         if not getattr(self, "ultima_cultura_selecionada", None):
+            # Nada a plantar; apenas limpar a seleção visual
+            self.celulas_selecionadas.clear()
+            self.posicao_inicio_arrasto = None
+            self.malha_ui.redesenhar()
             return
 
         cultura_base = Cultura(**self.ultima_cultura_selecionada)
