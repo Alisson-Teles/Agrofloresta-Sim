@@ -12,7 +12,10 @@ ESCALA_METRO = 30
 TAMANHO_INICIAL_MALHA = 10
 
 class JanelaPrincipal:
+
     def __init__(self, caminho_json):
+
+        
 
         self.celulas_selecionadas = set()  # Conjunto de (x, y)
         self.modo_remocao = False
@@ -34,10 +37,13 @@ class JanelaPrincipal:
             bg="white"
         )
         self.canvas.pack()
-        self.canvas.bind("<Button-1>", self.plantar_em_clique)  # Clique para plantar
+
         self.canvas.bind("<Button-1>", self.iniciar_arrasto)
-        self.canvas.bind("<B1-Motion>", self.atualizar_area_arrasto) #Mostrar seleção em tempo real
+        self.canvas.bind("<B1-Motion>", self.atualizar_area_arrasto)
         self.canvas.bind("<ButtonRelease-1>", self.finalizar_arrasto)
+        
+        # use duplo-clique para plantar uma célula
+        self.canvas.bind("<Double-Button-1>", self.plantar_em_clique)
         
 
         self.malha_ui = InterfaceMalha(self.canvas, self.espaco, pai=self)
@@ -50,11 +56,13 @@ class JanelaPrincipal:
         self.atualizar_combobox_culturas(self.controlador.culturas_dict)
         self.atualizar_selecionadas()
         self.malha_ui.redesenhar()
-        self.root.mainloop()
 
         style = ttk.Style()
         style.configure("BotaoVerde.TButton", background="green", foreground="white")
         style.map("BotaoVerde.TButton", background=[('active', 'darkgreen')])
+
+        self.root.mainloop()
+
 
     def criar_interface_lateral(self):
         tk.Label(self.frame_esq, text="Culturas", font=("Arial", 14, "bold")).pack()
@@ -89,7 +97,78 @@ class JanelaPrincipal:
         tk.Label(self.frame_esq, text="Remover Culturas", font=("Arial", 14, "bold")).pack(pady=10)
         self.frame_s = tk.Frame(self.frame_esq)
         self.frame_s.pack(fill="x")
+        #Botão gerar relatório:
+        ttk.Button(self.frame_esq,text="Relatório do sistema",command=self.gerar_relatorio_sistema).pack(pady=10, fill="x")
+    
+    def gerar_relatorio_sistema(self):
+        culturas_plantadas = {}
 
+        for x in range(self.espaco.tamanho):
+            for y in range(self.espaco.tamanho):
+                cultura = self.espaco.grade[x][y]
+                if cultura:
+                    culturas_plantadas[cultura.nome] = cultura  # evita duplicatas
+
+        if not culturas_plantadas:
+            messagebox.showinfo("Relatório", "Nenhuma cultura foi plantada na malha.")
+            return
+
+        relatorio = "📋 RELATÓRIO AGRONÔMICO DO SISTEMA\n\n"
+
+        for nome, c in sorted(culturas_plantadas.items()):
+            relatorio += f"{c.icone or ''} {c.nome.upper()} ({c.categoria})\n"
+            relatorio += f"- Classificação: {c.classificacao_agronomica} | {c.classificacao_morfologica}\n"
+            if c.sinergias:
+                relatorio += f"- Sinergias: {', '.join(c.sinergias)}\n"
+            if c.antagonismos:
+                relatorio += f"- Antagonismos: {', '.join(c.antagonismos)}\n"
+            relatorio += f"- Tempo de crescimento: {c.tempo_crescimento} dias\n"
+            relatorio += f"- Tempo de colheita: {c.tempo_colheita or 'Não especificado'}\n"
+            relatorio += f"- Rendimento: {c.rendimento} unidades\n"
+            relatorio += f"- Porte: {c.porte or 'Desconhecido'} | Ciclo: {c.ciclo or 'Desconhecido'}\n"
+            relatorio += f"- Exigência nutricional: {c.exigencia_nutricional or 'Não especificado'}\n"
+            relatorio += f"- Sombreamento gerado: {c.sombreamento}\n"
+            relatorio += f"- Diâmetro da copa: {c.diametro_copa} m\n"
+
+            # Necessidades
+            relatorio += f"- Necessidades:\n"
+            if c.necessidade_luz:
+                relatorio += f"  • Luz: {c.necessidade_luz}\n"
+            if c.necessidade_hidrica:
+                relatorio += f"  • Água: {c.necessidade_hidrica}\n"
+            if c.necessidades and isinstance(c.necessidades, dict):
+                if "solo" in c.necessidades:
+                    relatorio += f"  • Solo: {c.necessidades['solo']}\n"
+            if c.temperatura_ideal:
+                relatorio += f"  • Temperatura ideal: {c.temperatura_ideal}\n"
+            if c.faixa_ph:
+                relatorio += f"  • Faixa de pH: {c.faixa_ph}\n"
+
+            relatorio += f"- Cobertura de solo: {c.cobertura_solo}\n"
+            relatorio += f"- Atrai polinizadores: {c.atrai_polinizadores or 'Não informado'}\n"
+            if c.interacao_outros:
+                relatorio += f"- Interações com o sistema: {c.interacao_outros}\n"
+            if c.pragas:
+                relatorio += f"- Pragas comuns: {', '.join(c.pragas)}\n"
+            if c.doencas:
+                relatorio += f"- Doenças recorrentes: {', '.join(c.doencas)}\n"
+            if c.controle_natural:
+                relatorio += f"- Controle natural recomendado: {', '.join(c.controle_natural)}\n"
+
+            relatorio += "\n"
+
+        # Exibe o relatório em uma janela de texto
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Relatório do sistema")
+        dlg.geometry("780x580")
+
+        txt = tk.Text(dlg, wrap="word", font=("Arial", 11))
+        txt.insert("1.0", relatorio)
+        txt.pack(expand=True, fill="both", padx=10, pady=10)
+
+        ttk.Button(dlg, text="Fechar", command=dlg.destroy).pack(pady=6)
+
+    
     def atualizar_area_arrasto(self, event):
         if not self.posicao_inicio_arrasto:
             return
@@ -311,9 +390,11 @@ class JanelaPrincipal:
                 self.espaco.grade[x][y] = nova
                 self.controlador.registrar_selecao(nova, (x, y))
 
+        # Limpa seleção ANTES de redesenhar para a marca sumir imediatamente
+        self.celulas_selecionadas.clear()
+        self.posicao_inicio_arrasto = None
         self.atualizar_selecionadas()
         self.malha_ui.redesenhar()
-        self.celulas_selecionadas.clear()
 
 
     # ------------------------------
